@@ -148,6 +148,23 @@ AC_FUNC_LSTAT_FOLLOWS_SLASHED_SYMLINK
 
 AC_CHECK_FUNCS([strlcpy setgroups])
 
+dnl Checks for SQLite
+AC_MSG_CHECKING([for sqlite3 header])
+AC_CHECK_HEADERS([sqlite3.h], [ac_cv_header_sqlite3_h=yes], [ac_cv_header_sqlite3_h=no])
+AC_MSG_RESULT([$ac_cv_header_sqlite3_h])
+
+AC_MSG_CHECKING([for sqlite3 library (sqlite3)])
+AC_CHECK_LIB([sqlite3], [sqlite3_open], [ac_cv_lib_sqlite3=yes], [ac_cv_lib_sqlite3=no])
+AC_MSG_RESULT([$ac_cv_lib_sqlite3])
+
+if test "x$ac_cv_header_sqlite3_h" = "xyes" && test "x$ac_cv_lib_sqlite3" = "xyes"; then
+    AC_DEFINE([HAVE_SQLITE3], [1], [Define if sqlite3 is available])
+    LIBS="$LIBS -lsqlite3"
+else
+    AC_MSG_ERROR([sqlite3 development library not found. sqlite3 is required to build with the new filtering backend. Please install the sqlite3 development package (e.g. libsqlite3-dev).])
+fi
+AC_SUBST(LIBS)
+
 dnl Enable extra warnings
 DESIRED_FLAGS="-fdiagnostics-show-option -Wall -Wextra -Wno-unused-parameter -Wmissing-prototypes -Wstrict-prototypes -Wmissing-declarations -Wfloat-equal -Wundef -Wformat=2 -Wlogical-op -Wmissing-include-dirs -Wformat-nonliteral -Wold-style-definition -Wpointer-arith -Waggregate-return -Winit-self -Wpacked --std=c89 -ansi -Wno-overlength-strings -Wno-long-long -Wno-overlength-strings -Wdeclaration-after-statement -Wredundant-decls -Wmissing-noreturn -Wshadow -Wendif-labels -Wcast-qual -Wcast-align -Wwrite-strings -Wp,-D_FORTIFY_SOURCE=2 -fno-common"
 
