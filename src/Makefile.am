@@ -59,7 +59,7 @@ EXTRA_tinyproxy_SOURCES = filter.c filter.h \
 	reverse-proxy.c reverse-proxy.h \
 	transparent-proxy.c transparent-proxy.h
 tinyproxy_DEPENDENCIES = @ADDITIONAL_OBJECTS@
-tinyproxy_LDADD = @ADDITIONAL_OBJECTS@ -lpthread
+tinyproxy_LDADD = @ADDITIONAL_OBJECTS@ @LIBS@ -lpthread
 
 if HAVE_GPERF
 conf-tokens.c: conf-tokens-gperf.inc
@@ -68,4 +68,3 @@ conf-tokens-gperf.inc: conf-tokens.gperf
 endif
 
 EXTRA_DIST = conf-tokens.gperf conf-tokens-gperf.inc
-
