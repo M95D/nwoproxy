@@ -239,32 +239,17 @@ ViaProxyName "tinyproxy"
 #
 # Filter: This allows you to specify the location of the filter file.
 #
-#Filter "@pkgsysconfdir@/filter"
-
-#
-# FilterURLs: Filter based on URLs rather than domains.
-#
-#FilterURLs On
-
-#
-# FilterType: Use bre (default), ere, or fnmatch for filtering.
-#
-#FilterType fnmatch
-
-#
-# FilterCaseSensitive: Use case sensitive regular expressions.
-#
-#FilterCaseSensitive On
+#Filter "@pkgsysconfdir@/filter.db"
 
 #
 # FilterDefaultDeny: Change the default policy of the filtering system.
 # If this directive is commented out, or is set to "No" then the default
 # policy is to allow everything which is not specifically denied by the
-# filter file.
+# filter database.
 #
 # However, by setting this directive to "Yes" the default policy becomes
 # to deny everything which is _not_ specifically allowed by the filter
-# file.
+# database.
 #
 #FilterDefaultDeny Yes
 

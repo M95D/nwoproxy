@@ -133,11 +133,7 @@ static HANDLE_FUNC (handle_errorfile);
 static HANDLE_FUNC (handle_addheader);
 #ifdef FILTER_ENABLE
 static HANDLE_FUNC (handle_filter);
-static HANDLE_FUNC (handle_filtercasesensitive);
 static HANDLE_FUNC (handle_filterdefaultdeny);
-static HANDLE_FUNC (handle_filterextended);
-static HANDLE_FUNC (handle_filterurls);
-static HANDLE_FUNC (handle_filtertype);
 #endif
 static HANDLE_FUNC (handle_group);
 static HANDLE_FUNC (handle_listen);
@@ -974,21 +970,6 @@ static HANDLE_FUNC (handle_filter)
         return set_string_arg (&conf->filter, line, &match[2]);
 }
 
-static HANDLE_FUNC (handle_filterurls)
-{
-        conf->filter_opts |=
-             get_bool_arg (line, &match[2]) * FILTER_OPT_URL;
-        return 0;
-}
-
-static HANDLE_FUNC (handle_filterextended)
-{
-        warn_deprecated("FilterExtended, use FilterType", lineno);
-        conf->filter_opts |=
-             get_bool_arg (line, &match[2]) * FILTER_OPT_TYPE_ERE;
-        return 0;
-}
-
 static HANDLE_FUNC (handle_filterdefaultdeny)
 {
         assert (match[2].rm_so != -1);
@@ -997,33 +978,6 @@ static HANDLE_FUNC (handle_filterdefaultdeny)
         return 0;
 }
 
-static HANDLE_FUNC (handle_filtercasesensitive)
-{
-        conf->filter_opts |=
-            get_bool_arg (line, &match[2]) * FILTER_OPT_CASESENSITIVE;
-        return 0;
-}
-
-static HANDLE_FUNC (handle_filtertype)
-{
-        static const struct { unsigned short flag; char type[8]; }
-        ftmap[] = {
-             {FILTER_OPT_TYPE_ERE,	"ere"},
-             {FILTER_OPT_TYPE_BRE,	"bre"},
-             {FILTER_OPT_TYPE_FNMATCH,	"fnmatch"},
-        };
-        char *type;
-        unsigned i;
-        type = get_string_arg(line, &match[2]);
-        if (!type) return -1;
-
-        for(i=0;i<sizeof(ftmap)/sizeof(ftmap[0]);++i)
-                if(!strcasecmp(ftmap[i].type, type))
-                        conf->filter_opts |= ftmap[i].flag;
-
-        safefree (type);
-        return 0;
-}
 #endif
 
 #ifdef REVERSE_SUPPORT

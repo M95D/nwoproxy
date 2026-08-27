@@ -33,11 +33,7 @@ CD_basicauthrealm,
 CD_errorfile,
 CD_addheader,
 CD_filter,
-CD_filterurls,
-CD_filtertype,
-CD_filterextended,
 CD_filterdefaultdeny,
-CD_filtercasesensitive,
 CD_reversebaseurl,
 CD_reverseonly,
 CD_reversemagic,
@@ -52,4 +48,3 @@ const struct config_directive_entry *
 config_directive_find (register const char *str, register size_t len);
 
 #endif
-
