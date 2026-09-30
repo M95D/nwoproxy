@@ -26,7 +26,7 @@ static const char *filterdb_check="\
 
 // Initialize the SQLite database.
 // Opens or creates the database file specified in config->filterdb.
-int filterdb_init(void){
+int filterdb_open(void){
 	int ret;
 	char *errmsg = NULL;
 	

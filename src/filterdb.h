@@ -1,7 +1,7 @@
 #include <sqlite3.h>
 
 // (Create and) open the filter database.
-// return: 0 ok, -1 error
+// return: 0 ok, -1 failed
 int filterdb_open(void);
 
 // Close filter database.
