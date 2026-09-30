@@ -32,6 +32,8 @@
 #include "reqs.h"
 #include "conf.h"
 #include "sblist.h"
+#include <sqlite3.h>
+#include "filterdb.h"
 
 #define FILTER_BUFFER_LEN (512)
 
@@ -52,89 +54,18 @@ static int already_init = 0;
  */
 void filter_init (void)
 {
-        FILE *fd;
-        struct filter_list fe;
-        char buf[FILTER_BUFFER_LEN];
-        char *s, *start;
-        int cflags, lineno = 0;
+        /* New filtering uses SQLite database. No file-based parsing.
+         * We simply mark the filter as initialized when a filter DB is
+         * configured. The actual DB connection is handled in filterdb.c
+         * (opened at startup).
+         */
+        if (already_init) return;
 
-        if (fl || already_init) {
+        if (!config || !config->filter) {
+                /* No filtering configured */
+                already_init = 0;
                 return;
         }
-
-        fd = fopen (config->filter, "r");
-        if (!fd) {
-                perror ("filter file");
-                exit (EX_DATAERR);
-        }
-
-        cflags = REG_NEWLINE | REG_NOSUB;
-        cflags |= (REG_EXTENDED * !!(config->filter_opts & FILTER_OPT_TYPE_ERE));
-        cflags |= (REG_ICASE * !(config->filter_opts & FILTER_OPT_CASESENSITIVE));
-
-        while (fgets (buf, FILTER_BUFFER_LEN, fd)) {
-                ++lineno;
-                /* skip leading whitespace */
-                s = buf;
-                while (*s && isspace ((unsigned char) *s))
-                        s++;
-                start = s;
-
-                /*
-                 * Remove any trailing white space and
-                 * comments.
-                 */
-                while (*s) {
-                        if (isspace ((unsigned char) *s))
-                                break;
-                        if (*s == '#') {
-                                /*
-                                 * If the '#' char is preceeded by
-                                 * an escape, it's not a comment
-                                 * string.
-                                 */
-                                if (s == buf || *(s - 1) != '\\')
-                                        break;
-                        }
-                        ++s;
-                }
-                *s = '\0';
-                s = start;
-
-                /* skip blank lines and comments */
-                if (*s == '\0')
-                        continue;
-
-                if (!fl) fl = sblist_new(sizeof(struct filter_list),
-                                         4096/sizeof(struct filter_list));
-
-                if (config->filter_opts & FILTER_OPT_TYPE_FNMATCH) {
-                        fe.u.pattern = safestrdup(s);
-                        if (!fe.u.pattern) goto oom;
-                } else {
-
-                        err = regcomp (&fe.u.cpatb, s, cflags);
-                        if (err != 0) {
-                                if (err == REG_ESPACE) goto oom;
-                                fprintf (stderr,
-                                         "Bad regex in %s: line %d - %s\n",
-                                         config->filter, lineno, s);
-                                exit (EX_DATAERR);
-                        }
-                }
-                if (!sblist_add(fl, &fe)) {
-                oom:;
-                        fprintf (stderr,
-                                 "out of memory parsing filter file %s: line %d\n",
-                                 config->filter, lineno);
-                        exit (EX_DATAERR);
-                }
-        }
-        if (ferror (fd)) {
-                perror ("fgets");
-                exit (EX_DATAERR);
-        }
-        fclose (fd);
 
         already_init = 1;
 }
@@ -142,23 +73,10 @@ void filter_init (void)
 /* unlink the list */
 void filter_destroy (void)
 {
-        struct filter_list *p;
-        size_t i;
-
-        if (already_init) {
-                if (fl) {
-                        for (i = 0; i < sblist_getsize(fl); ++i) {
-                                p = sblist_get(fl, i);
-                                if (config->filter_opts & FILTER_OPT_TYPE_FNMATCH)
-                                        safefree(p->u.pattern);
-                                else
-                                        regfree (&p->u.cpatb);
-                        }
-                        sblist_free(fl);
-                }
-                fl = NULL;
-                already_init = 0;
-        }
+        /* Nothing to free for DB-backed filters here. The DB connection
+         * is closed by filterdb_close() called from main.c on shutdown.
+         */
+        already_init = 0;
 }
 
 /**
@@ -166,42 +84,165 @@ void filter_destroy (void)
  */
 void filter_reload (void)
 {
-        if (config->filter) {
-                log_message (LOG_NOTICE, "Re-reading filter file.");
-                filter_destroy ();
-                filter_init ();
+        /* With DB-backed filters we don't reload from file; nothing to do.
+         * Keep API for compatibility.
+         */
+        if (config && config->filter) {
+                log_message (LOG_NOTICE, "Filter DB in use; reload is a no-op.");
         }
 }
 
 /* Return 0 to allow, non-zero to block */
 int filter_run (const char *str)
 {
-        struct filter_list *p;
-        size_t i;
-        int result;
+        sqlite3 *db;
+        char *copy = NULL;
+        char **parents = NULL;
+        size_t np = 0;
+        int i;
+        int rc;
+        char *errmsg = NULL;
+        char *sql = NULL;
+        int result = 0; /* 0 allow, 1 deny */
 
-        if (!fl || !already_init)
+        if (!config || !config->filter) goto COMMON_EXIT;
+        if (!already_init) goto COMMON_EXIT;
+        if (!str) goto COMMON_EXIT;
+
+        db = filterdb_get_handle();
+        if (!db) {
+                log_message(LOG_ERR, "Filter DB not open");
                 goto COMMON_EXIT;
+        }
 
-        for (i = 0; i < sblist_getsize(fl); ++i) {
-                p = sblist_get(fl, i);
-                if (config->filter_opts & FILTER_OPT_TYPE_FNMATCH)
-                        result = fnmatch (p->u.pattern, str, 0);
-                else
-                        result =
-                            regexec (&p->u.cpatb, str, (size_t) 0, (regmatch_t *) 0, 0);
+        /* Make a mutable copy of the hostname */
+        copy = safestrdup(str);
+        if (!copy) {
+                log_message(LOG_ERR, "Out of memory in filter_run");
+                goto COMMON_EXIT;
+        }
 
-                if (result == 0) {
-                        if (!(config->filter_opts & FILTER_OPT_DEFAULT_DENY))
-                                return 1;
-                        else
-                                return 0;
+        /* Strip possible port part if present (e.g. example.com:8080) */
+        {
+                char *pcolon = strrchr(copy, ':');
+                char *pbracket = strchr(copy, ']'); /* IPv6 literals like [::1]:port */
+                if (pcolon) {
+                        /* If there's a ']' before the colon, it's an IPv6 literal with port; keep up to ']' */
+                        if (!pbracket || pbracket < pcolon) {
+                                /* colon likely indicates port; remove it */
+                                *pcolon = '\0';
+                        }
                 }
         }
 
+        /* Build list of parent domains: fullhost, then removing leftmost label each time */
+        {
+                char *p = copy;
+                while (p && *p) {
+                        char *entry = safestrdup(p);
+                        if (!entry) goto oom;
+                        parents = (char **) realloc(parents, sizeof(char*) * (np + 1));
+                        if (!parents) {
+                                safefree(entry);
+                                goto oom;
+                        }
+                        parents[np++] = entry;
+                        char *dot = strchr(p, '.');
+                        if (!dot) break;
+                        p = dot + 1;
+                }
+        }
+
+        /* Build SQL statement. We will use direct execution since number of parameters varies.
+         * Use single quotes around domain names (domain names cannot contain single quote or backslash
+         * per the project assumptions) and COLLATE NOCASE for case-insensitive matching.
+         */
+        {
+                size_t bufsz = 1024;
+                size_t used = 0;
+                sql = safemalloc(bufsz);
+                if (!sql) goto oom;
+                used += snprintf(sql + used, bufsz - used,
+                                 "SELECT rule FROM domains WHERE rule IS NOT NULL AND (");
+
+                /* exact match */
+                used += snprintf(sql + used, bufsz - used,
+                                 "(domain = '%s' COLLATE NOCASE)", parents[0]);
+
+                /* subdomain matches for parents excluding the full host */
+                if (np > 1) {
+                        used += snprintf(sql + used, bufsz - used,
+                                         " OR (subdomains = 'Y' AND (domain IN (");
+
+                        for (i = 1; i < (int)np; ++i) {
+                                /* grow buffer if necessary */
+                                size_t need = strlen(parents[i]) + 8;
+                                if (used + need + 64 > bufsz) {
+                                        bufsz *= 2;
+                                        sql = saferealloc(sql, bufsz);
+                                        if (!sql) goto oom;
+                                }
+                                used += snprintf(sql + used, bufsz - used, "'%s'%s",
+                                                 parents[i], (i + 1 < (int)np) ? "," : "");
+                        }
+                        used += snprintf(sql + used, bufsz - used,
+                                         ")) COLLATE NOCASE)" );
+                }
+
+                used += snprintf(sql + used, bufsz - used,
+                                 ") ORDER BY LENGTH(domain) DESC LIMIT 1;" );
+        }
+
+        /* Execute query */
+        {
+                char **results = NULL;
+                int rows = 0, cols = 0;
+                rc = sqlite3_get_table(db, sql, &results, &rows, &cols, &errmsg);
+                if (rc != SQLITE_OK) {
+                        log_message(LOG_ERR, "Filter DB query failed: %s", errmsg ? errmsg : sqlite3_errmsg(db));
+                        if (errmsg) sqlite3_free(errmsg);
+                        if (results) sqlite3_free_table(results);
+                        goto COMMON_EXIT;
+                }
+
+                if (rows > 0 && cols > 0) {
+                        /* results array: first row is header, data starts at index cols */
+                        char *val = results[cols];
+                        if (val && val[0] == 'P') {
+                                result = 0; /* permit */
+                        } else if (val && val[0] == 'D') {
+                                result = 1; /* deny */
+                        } else {
+                                /* Unexpected value - treat as default */
+                                result = (config->filter_opts & FILTER_OPT_DEFAULT_DENY) ? 1 : 0;
+                        }
+                } else {
+                        /* No matching rule found */
+                        result = (config->filter_opts & FILTER_OPT_DEFAULT_DENY) ? 1 : 0;
+                }
+
+                if (results) sqlite3_free_table(results);
+        }
+
+        /* fall through to cleanup */
+
 COMMON_EXIT:
-        if (!(config->filter_opts & FILTER_OPT_DEFAULT_DENY))
-                return 0;
-        else
-                return 1;
+        if (copy) safefree(copy);
+        if (parents) {
+                for (i = 0; i < (int)np; ++i) safefree(parents[i]);
+                free(parents);
+        }
+        if (sql) safefree(sql);
+        return result;
+
+oom:
+        log_message(LOG_ERR, "Out of memory parsing filter data");
+        if (copy) safefree(copy);
+        if (parents) {
+                for (i = 0; i < (int)np; ++i) safefree(parents[i]);
+                free(parents);
+        }
+        if (sql) safefree(sql);
+        /* On OOM, be conservative and block if default deny, otherwise allow */
+        return (config && (config->filter_opts & FILTER_OPT_DEFAULT_DENY)) ? 1 : 0;
 }
