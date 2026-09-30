@@ -36,7 +36,7 @@
 #include "conf.h"
 #include "daemon.h"
 #include "heap.h"
-#include "filter.h"
+#include "filterdb.h"
 #include "child.h"
 #include "loop.h"
 #include "log.h"
@@ -368,8 +368,11 @@ main (int argc, char **argv)
         setup_sig(SIGPIPE, SIG_IGN, "SIGPIPE", argv[0]);
 
 #ifdef FILTER_ENABLE
-        if (config->filter)
-                filter_init ();
+        if (config->filter) {
+                if (filterdb_init() < 0) {
+                        exit (EX_SOFTWARE);
+                }
+        }
 #endif /* FILTER_ENABLE */
 
         /* Start listening on the selected port. */
@@ -441,8 +444,9 @@ main (int argc, char **argv)
         }
 
 #ifdef FILTER_ENABLE
-        if (config->filter)
-                filter_destroy ();
+        if (config->filter) {
+                filterdb_close();
+        }
 #endif /* FILTER_ENABLE */
 
         free_config (config);
